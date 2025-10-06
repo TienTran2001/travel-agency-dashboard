@@ -20,27 +20,31 @@ export const getExistingUser = async (id: string) => {
 
 export const loginWithGoogle = async () => {
   try {
-    account.createOAuth2Session(OAuthProvider.Google);
-  } catch (e) {
-    console.log('loginWithGoogle', e);
+    account.createOAuth2Session(
+      OAuthProvider.Google,
+      `${window.location.origin}/`,
+      `${window.location.origin}/404`
+    );
+  } catch (error) {
+    console.error('Error during OAuth2 session creation:', error);
   }
 };
 
 export const getUser = async () => {
   try {
     const user = await account.get();
-    if (!user) redirect('/sign-in');
+    if (!user?.$id) return redirect('/sign-in');
 
     const rows = await tables.listRows({
       databaseId: appWriteConfig.databaseId,
       tableId: appWriteConfig.userCollectionId,
-      queries: [
-        Query.equal('accountId', user.$id),
-        Query.select(['name', 'email', 'imageUrl', 'joinedAt', 'accountId']),
-      ],
+      queries: [Query.equal('accountId', user.$id)],
     });
+
+    return rows.total > 0 ? rows.rows[0] : null;
   } catch (e) {
-    console.log(e);
+    console.log('getUser error', e);
+    return redirect('/sign-in');
   }
 };
 
@@ -94,10 +98,10 @@ export const getGooglePicture = async () => {
 
 export const storeUserData = async () => {
   try {
-    const { $id } = await account.get();
-    const user = await getExistingUser($id);
+    const accountUser = await account.get(); // user từ Account service
+    const existingUser = await getExistingUser(accountUser.$id);
 
-    if (!user) return null;
+    if (existingUser) return existingUser; // đã có thì return
 
     const imageUrl = await getGooglePicture();
 
@@ -106,9 +110,9 @@ export const storeUserData = async () => {
       appWriteConfig.userCollectionId,
       ID.unique(),
       {
-        accountId: user.$id,
-        name: user.name,
-        email: user.email,
+        accountId: accountUser.$id,
+        name: accountUser.name,
+        email: accountUser.email,
         imageUrl: imageUrl || '',
         joinedAt: new Date().toISOString(),
       }
@@ -118,5 +122,23 @@ export const storeUserData = async () => {
   } catch (e) {
     console.log('storeUserData error', e);
     return null;
+  }
+};
+
+// Việt: Dùng cú pháp mới với table (tables.listRows)
+export const getAllUsers = async (limit: number, offset: number) => {
+  try {
+    const { rows: users, total } = await tables.listRows(
+      appWriteConfig.databaseId,
+      appWriteConfig.userCollectionId,
+      [Query.limit(limit), Query.offset(offset)]
+    );
+
+    if (total === 0) return { users: [], total };
+
+    return { users, total };
+  } catch (e) {
+    console.log('Error fetching users');
+    return { users: [], total: 0 };
   }
 };
